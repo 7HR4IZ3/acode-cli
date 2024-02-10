@@ -1,69 +1,6 @@
-const { Command } = require("commander");
-const { execSync, spawn } = require("child_process");
+const { execSync, exec, spawn } = require("child_process");
+const path = require("path");
 const fs = require("fs");
-
-let open;
-const program = new Command();
-
-program.name("Acode CLI").description("Acode cli interface.").version("0.0.1");
-
-program
-  .argument("<file>", "Open a file or folder in Acode")
-  .option("-h, --help", "Display help information")
-  .option("-v, --verbose", "Set verbose mode")
-  .option("-i", "--install", "Install as an extension")
-  .option("-t", "--terminal <server>", "Start and manager terminal servers");
-
-program.on("command:*", () => {
-  error("Invalid command!");
-});
-
-program.action(async (file, option) => {
-  open = await import("open");
-  let verbose = option.verbose;
-
-  if (option.help) {
-    return program.help();
-  }
-
-  if (option.terminal) {
-    startTerminal(option.args[0] || "acodex");
-  }
-
-  if (option.install) {
-    let path = getRealPath(file);
-    if (path == null) {
-      return error("Invalid path provided!");
-    }
-
-    verbose && log(`Installing extension from path: ${path}`);
-    // Your implementation goes here
-  } else if (file) {
-    let path = getRealPath(file);
-    if (path == null) {
-      return error("Invalid path provided!");
-    }
-
-    if (fs.existsSync(path)) {
-      // Open file in Acode
-      let fileStat = fs.statSync(path);
-      if (fileStat.isFile()) {
-        verbose && log(`Opening file: ${path}`);
-        await openFile(path);
-      } else {
-        verbose && log(`Opening folder: ${path}`);
-        await openFolder(path);
-      }
-    } else {
-      error("Invalid path provided!");
-    }
-  } else {
-    error(
-      "Please specify a file, folder, " + "or use --install for extensions."
-    );
-  }
-});
-program.parse();
 
 // Helper Functions
 function getRealPath(path) {
@@ -74,39 +11,83 @@ function getRealPath(path) {
   }
 }
 
-function startActivity(extraArgs) {
-  let main = package => {
-    let command = `am start-activity ${package}/.MainActivity ${extraArgs}`;
-    return execSync(command);
+async function startActivity(extraArgs, verbose) {
+  let main = async package => {
+    let command = `am start ${package}/.MainActivity ${extraArgs || ""}`;
+
+    return await new Promise((resolve, reject) => {
+      exec(command, (err, stdout, stderr) => {
+        if (err) {
+          return reject(err);
+        }
+
+        verbose && stdout && log(stdout);
+        verbose && stderr && error(stderr);
+
+        if (stderr) {
+          return resolve(1);
+        }
+        return resolve(0);
+      });
+    });
   };
 
   try {
     // For Acode paid version.
-    main("com.foxdebug.acode");
+    return await main("com.foxdebug.acode");
   } catch {
     // For Acode free version.
-    main("com.foxdebug.acodefree");
+    return await main("com.foxdebug.acodefree");
   }
 }
 
-function startTerminal(server) {
-  let command;
+function startTerminal(server, verbose) {
+  let command, args = [];
 
   if (server === "acodex") {
     command = "acodeX-server";
   } else if (server === "acode") {
-    command = "node ~/termServer/index.js";
+    command = 'termServer';
   }
-  
-  log(`Starting Terminal server for ${server} ("${command}").`);
 
-  let proc = spawn(command);
+  verbose && log(`Starting Terminal server for ${server} ("${command}").`);
+
+  let proc = spawn(command, args);
   proc.on("spawn", () => {
     log(`Terminal server for ${server} started.`);
+  });
+  proc.on("close", () => {
+    log(`Terminal server for ${server} stopped.`);
   });
 
   proc.stdout.on("data", data => {
     log(`(${server}): ${data}`);
+  });
+
+  proc.stderr.on("data", data => {
+    log(`(${server}): ${data}`);
+  });
+}
+
+function startAcodeLs(verbose) {
+  let command = "acode-ls", args = [];
+
+  verbose && log('Starting Acode Language Server.');
+
+  let proc = spawn(command, args);
+  proc.on("spawn", () => {
+    log('Language server started.');
+  });
+  proc.on("close", () => {
+    log('Language server stopped.');
+  });
+
+  proc.stdout.on("data", data => {
+    log(`(acode-ls): ${data}`);
+  });
+
+  proc.stderr.on("data", data => {
+    log(`(acode-ls): ${data}`);
   });
 }
 
@@ -122,13 +103,169 @@ function warn(...messages) {
   console.warn("[Acode CLI]", ...messages);
 }
 
-// Actions Implementations.
-function openFile(path) {
-  // startActivity(`-d "acode://cli/open-file/${encodeURIComponent(path)}"`);
-  return open.default(`acode://cli/open-file/${encodeURIComponent(path)}`);
+function createZipFile(basePath) {
+  const jszip = require("jszip");
+
+  const mainFile = path.join(basePath, "./main.js");
+  const iconFile = path.join(basePath, "./icon.png");
+  const pluginJSON = path.join(basePath, "./plugin.json");
+  const distFolder = path.join(basePath, "./dist");
+  let readmeDotMd = path.join(basePath, "./readme.md");
+
+  if (!fs.existsSync(readmeDotMd)) {
+    readmeDotMd = path.join(basePath, "./README.md");
+  }
+
+  // create zip file of dist folder
+
+  const zip = new jszip();
+
+  if (fs.existsSync(mainFile)) {
+    zip.file("main.js", fs.readFileSync(mainFile));
+  }
+  zip.file("icon.png", fs.readFileSync(iconFile));
+  zip.file("plugin.json", fs.readFileSync(pluginJSON));
+
+  if (!fs.existsSync(distFolder)) {
+    fs.mkdirSync(distFolder);
+  }
+
+  zip.file("readme.md", fs.readFileSync(readmeDotMd));
+
+  loadFile("", distFolder);
+
+  zip
+    .generateNodeStream({ type: "nodebuffer", streamFiles: true })
+    .pipe(fs.createWriteStream(path.join(basePath, "./dist.zip")))
+    .on("finish", () => {
+      log("Plugin dist.zip written.");
+    });
+
+  function loadFile(root, folder) {
+    const distFiles = fs.readdirSync(folder);
+    distFiles.forEach(file => {
+      const stat = fs.statSync(path.join(folder, file));
+
+      if (stat.isDirectory()) {
+        zip.folder(file);
+        loadFile(path.join(root, file), path.join(folder, file));
+        return;
+      }
+
+      if (!/LICENSE.txt/.test(file)) {
+        zip.file(
+          path.join(root, file),
+          fs.readFileSync(path.join(folder, file))
+        );
+      }
+    });
+  }
 }
 
-function openFolder(path) {
-  // startActivity(`-d "acode://cli/open-folder/${encodeURIComponent(path)}"`);
-  return open.default(`acode://cli/open-folder/${encodeURIComponent(path)}`);
+function getWebpackConfig(basePath, configPath) {
+  if (!configPath) {
+    configPath = path.join(basePath, "webpack.config.js");
+  }
+
+  return require(configPath);
 }
+
+function onBuildExtension(basePath, err, stats) {
+  if (err) {
+    error("(webpack):", err.stack || err);
+    if (err.details) {
+      error("(webpack):", err.details);
+    }
+    return;
+  }
+
+  const info = stats.toJson();
+  if (stats.hasErrors()) {
+    error("(webpack):", info.errors);
+  }
+
+  if (stats.hasWarnings()) {
+    warn("(webpack):", info.warnings);
+  }
+
+  log(
+    "(webpack):",
+    stats.toString({
+      chunks: false,
+      colors: true
+    })
+  );
+
+  installDistZip(basePath);
+}
+
+function installDistZip(basePath) {
+  let distPath = path.join(basePath, "dist.zip");
+  if (fs.existsSync(distPath)) {
+    log("Installing plugin from: ", distPath);
+    _open(`acode://cli/install/${encodeURIComponent(distPath)}`);
+  }
+}
+
+function installWebpack(path, options) {
+  const webpack = require("webpack");
+  const compiler = webpack(getWebpackConfig(path, options.config));
+
+  if (options.watch) {
+    const watching = compiler.watch(
+      {
+        aggregateTimeout: 300,
+        poll: undefined
+      },
+      (err, stats) => onBuildExtension(path, err, stats)
+    );
+  } else {
+    compiler.run((err, stats) => {
+      onBuildExtension(path, err, stats);
+      compiler.close(closeErr => {});
+    });
+  }
+}
+
+async function installExtension(path, options) {
+  if (options.simple) {
+    await createZipFile(path);
+    installDistZip(path);
+  } else {
+    installWebpack(path, options);
+  }
+}
+
+async function _open(uri, verbose) {
+  let exitCode = await startActivity(verbose);
+  if (exitCode === 0) {
+    await new Promise(r => setTimeout(r, 5000));
+  }
+
+  let open = await import("open");
+  await open.default(uri);
+}
+
+// Actions Implementations.
+function openFile(path, verbose) {
+  return _open(`acode://cli/open-file/${encodeURIComponent(path)}`, verbose);
+}
+
+function openFolder(path, verbose) {
+  return _open(`acode://cli/open-folder/${encodeURIComponent(path)}`, verbose);
+}
+
+module.exports = {
+  getRealPath,
+  openFolder,
+  openFile,
+  startTerminal,
+  startAcodeLs,
+  installExtension,
+  open: _open,
+
+  start: startActivity,
+  extensions: {
+    install: installExtension
+  }
+};
