@@ -1,0 +1,30 @@
+{
+  "name": "acode",
+  "version": "1.0.0",
+  "description": "Acode companion cli application.",
+  "main": "index.js",
+  "bin": {
+    "acode": "index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "acode", "cli",
+    "plugin"
+  ],
+  "bugs": {
+    "url": "https://github.com/7HR4IZ3/acode-cli/issues"
+  },
+  "homepage": "https://github.com/7HR4IZ3/acode-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/7HR4IZ3/acode-cli.git"
+  },
+  "author": "Thraize",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.0.0",
+    "open": "^10.0.3"
+  }
+}
