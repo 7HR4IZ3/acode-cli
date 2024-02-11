@@ -4,6 +4,7 @@ const fs = require("fs");
 
 const {
   open,
+  start,
   openFile,
   openFolder,
   getRealPath,
@@ -107,6 +108,8 @@ program.action(async (file, option) => {
     } else {
       error("Invalid path provided!");
     }
+  } else {
+  	await start();
   }
 });
 program.parse();
