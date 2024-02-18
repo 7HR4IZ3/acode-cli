@@ -1,6 +1,6 @@
 {
-  "name": "acode",
-  "version": "1.0.0",
+  "name": "@thraize/acode-cli",
+  "version": "1.0.1",
   "description": "Acode companion cli application.",
   "main": "index.js",
   "bin": {
